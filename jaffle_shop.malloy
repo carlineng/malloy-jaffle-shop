@@ -1,0 +1,52 @@
+source: raw_customers is duckdb.table('./data/raw_customers.csv') extend {}
+source: raw_orders is duckdb.table('./data/raw_orders.csv') extend {}
+source: raw_payments is duckdb.table('./data/raw_payments.csv') extend {
+    rename: amount_cents is amount
+}
+
+source: stg_customers is raw_customers -> {
+    select:
+        customer_id is id
+        first_name
+        last_name
+} extend {}
+
+source: stg_payments is raw_payments -> {
+    select:
+        payment_id is id
+        order_id
+        payment_method
+        amount_cents
+} extend {
+    dimension:
+        amount_dollars is amount_cents / 100
+        
+    measure:
+        total_amount is amount_dollars.sum()
+        credit_card_amount_dollars is amount_dollars.sum() { where: payment_method = 'credit_card' }
+        coupon_amount_dollars is amount_dollars.sum() { where: payment_method = 'coupon' }
+        bank_transfer_amount_dollars is amount_dollars.sum() { where: payment_method = 'bank_transfer' }
+        gift_card_amount_dollars is amount_dollars.sum() { where: payment_method = 'gift_card' }
+}
+
+source: order_payments is stg_payments -> {
+    group_by: order_id
+    aggregate: 
+        total_amount
+        credit_card_amount_dollars
+        coupon_amount_dollars
+        bank_transfer_amount_dollars
+        gift_card_amount_dollars
+}
+
+source: stg_orders is raw_orders -> {
+    select:
+        order_id is id
+        customer_id is user_id
+        order_date
+        status
+} extend {}
+
+source: orders is stg_orders extend {
+    join_one: order_payments on order_id = order_payments.order_id
+}
